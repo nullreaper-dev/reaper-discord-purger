@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name            Reaper - Discord Message Purger
 // @description     Bulk delete your Discord messages, or mass-leave servers, with style. Fork of Undiscord with a new UI, effects and hardening.
-// @version         1.9.0
+// @version         1.9.1
 // @author          nullreaper
 // @match           https://*.discord.com/app
 // @match           https://*.discord.com/channels/*
@@ -32,7 +32,12 @@
  * v1.9.0: added a separate "Leave Servers" tool (mass-leave guilds via the
  * official DELETE /users/@me/guilds/{id} endpoint). It is its own code path,
  * entirely separate from the purge engine above, with its own confirm step
- * (type LEAVE) and rate-limit handling. It never touches messages.
+ * and rate-limit handling. It never touches messages.
+ * v1.9.1: Leave Servers confirm is now one-click/Enter, same as the delete
+ * dialog; added a proper finish screen when a leave run completes; auth
+ * token lookup now retries a couple of times before giving up (fewer "No
+ * auth token found" prompts on either tool); fixed a pre-existing bug where
+ * the toolbar's server badge could show a raw server ID instead of its name.
  *
 * Reaper modifications: Copyright (c) 2025 nullreaper
  *
@@ -71,7 +76,7 @@
 	window.__reaperLoaded = true;
 
 	/* rollup-plugin-baked-env */
-	const VERSION = "1.9.0";
+	const VERSION = "1.9.1";
 	const BRAND_NAME = 'Reaper';      // change the tool name here
 	const AUTHOR_NAME = 'nullreaper';  // change your name/handle here
 
@@ -1799,6 +1804,17 @@ body[data-ud-theme] #undicord-btn.running{ filter: hue-rotate(var(--ud-hue)) dro
 #ud-modal button.ud-go:hover{ background: linear-gradient(180deg, #ff4058, #c20d24); box-shadow: 0 0 26px rgba(255,42,68,.8); }
 #ud-modal button.ud-go:disabled{ opacity: .4; cursor: not-allowed; box-shadow: none; }
 #ud-modal kbd{ font: 11px "JetBrains Mono", monospace; padding: 1px 5px; border-radius: 4px; border: 1px solid rgba(255,60,75,.35); color: rgba(255,190,190,.8); margin-left: 6px; }
+
+/* Leave Servers finish screen */
+#ud-modal .ud-finish{ margin: 4px 22px 14px; padding: 16px; border-radius: 12px; text-align: center;
+  background: rgba(46,204,113,.1); border: 1px solid rgba(46,204,113,.4); box-shadow: inset 0 0 24px rgba(46,204,113,.12);
+  animation: ud-modal-in .25s cubic-bezier(.2,1.4,.4,1); }
+#ud-modal .ud-finish.warn{ background: rgba(255,180,84,.1); border-color: rgba(255,180,84,.4); box-shadow: inset 0 0 24px rgba(255,180,84,.12); }
+#ud-modal .ud-finish-icon{ font-size: 30px; line-height: 1; margin-bottom: 8px; filter: drop-shadow(0 0 8px rgba(46,204,113,.6)); }
+#ud-modal .ud-finish.warn .ud-finish-icon{ filter: drop-shadow(0 0 8px rgba(255,180,84,.6)); }
+#ud-modal .ud-finish b{ display: block; font: 800 16px/1.3 "JetBrains Mono", Consolas, monospace; color: #2ecc71; letter-spacing: .02em; }
+#ud-modal .ud-finish.warn b{ color: #ffb454; }
+#ud-modal .ud-finish span{ display: block; margin-top: 4px; font-size: 12.5px; color: rgba(255,236,236,.75); }
 
 #ud-toasts{ position: fixed; z-index: 100001; left: 50%; top: 18px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .ud-toast{ pointer-events: auto; max-width: min(480px, calc(100vw - 32px)); padding: 10px 14px 10px 12px; border-radius: 10px; display: flex; gap: 10px; align-items: flex-start;
@@ -4926,6 +4942,31 @@ body.undiscord-pick-message.after [id^="message-content-"]:hover::after {
     }
 
     const convStable = { name: '', avatar: '' };
+    const guildNameCache = new Map();
+    const guildNameFetchInFlight = new Set();
+    async function resolveGuildNameViaApi(guildId) {
+      const gid = String(guildId || '').trim();
+      if (!gid || guildNameCache.has(gid) || guildNameFetchInFlight.has(gid)) return;
+      // Only use a token that's already sitting in the box - never trigger an
+      // auth prompt or auto-fill just to resolve a display label.
+      const tok = ($('input#token')?.value || '').trim();
+      if (!tok) return;
+      guildNameFetchInFlight.add(gid);
+      try {
+        const resp = await fetch(`https://discord.com/api/v10/guilds/${encodeURIComponent(gid)}`, { headers: { Authorization: tok } });
+        if (resp.ok) {
+          const g = await resp.json().catch(() => null);
+          if (g?.name) {
+            guildNameCache.set(gid, g.name);
+            scheduleConversationBadgeUpdate();
+          }
+        }
+      } catch {
+        /* silent - this is a cosmetic label upgrade, not a required step */
+      } finally {
+        guildNameFetchInFlight.delete(gid);
+      }
+    }
     let badgeTimer = null;
     let lastBadgeRunAt = 0;
     const BADGE_MIN_INTERVAL_MS = 250;
@@ -4962,9 +5003,10 @@ body.undiscord-pick-message.after [id^="message-content-"]:hover::after {
 
       if (!isDm) {
         const guildInfo = getGuildInfoFromNavById(guildId) || { name: '', avatar: '' };
-        const guildName = normalizeConvName(guildInfo?.name || '');
-        const serverName = guildName || `Server ${guildId}`;
-        const serverAvatar = guildInfo?.avatar || makeGuildFallbackAvatarDataUrl(serverName || guildId || 'Server');
+        const guildName = normalizeConvName(guildInfo?.name || '') || guildNameCache.get(guildId) || '';
+        if (!guildName) resolveGuildNameViaApi(guildId); // self-heals the label in place once resolved, no raw IDs shown meanwhile
+        const serverName = guildName || 'Server';
+        const serverAvatar = guildInfo?.avatar || makeGuildFallbackAvatarDataUrl(serverName);
 
         ui.convBadge.style.display = '';
         ui.convName.textContent = serverName;
@@ -7391,7 +7433,13 @@ async function startAction() {
 	  const input = ui.undiscordWindow.querySelector('input#token');
 	  let tok = input.value.trim();
 	  if (!tok) {
-	    tok = await fillToken();
+	    // Discord's webpack modules can still be settling right after a picker opens -
+	    // a couple of quick retries clears up most of what would otherwise show as
+	    // "No auth token found" even though the token is genuinely there a beat later.
+	    for (let attempt = 0; attempt < 3 && !tok; attempt++) {
+	      if (attempt > 0) await sleep(220);
+	      try { tok = await fillToken(); } catch { tok = ''; }
+	    }
 	    if (tok) input.value = tok;
 	  }
 	  return tok;
@@ -7964,6 +8012,7 @@ async function startAction() {
 	/** Themed confirm step. Requires typing LEAVE - this is harder to undo than a purge run. */
 	function udConfirmLeave(servers) {
 	  ensureModalCss();
+	  // Matches udConfirmDelete's pattern: one click / Enter is enough, no typed guard.
 	  const MAX_SHOWN = 150;
 	  const shown = servers.slice(0, MAX_SHOWN);
 	  const rows = shown.map(s => `<div><em>${escapeHTML(s.name)}</em></div>`).join('') || '<div><em>(nothing selected)</em></div>';
@@ -7983,16 +8032,14 @@ async function startAction() {
   </div>
   <div class="ud-list">${rows}</div>
   ${moreCount > 0 ? `<div class="ud-more">…and ${moreCount} more not shown.</div>` : ''}
-  <label class="ud-type">Type <b>LEAVE</b> to confirm<input id="ud-leave-input" autocomplete="off" spellcheck="false" placeholder="LEAVE"></label>
   <div class="ud-actions">
     <button id="ud-leave-cancel">Cancel<kbd>Esc</kbd></button>
-    <button id="ud-leave-go" class="ud-go" disabled>🚪 LEAVE</button>
+    <button id="ud-leave-go" class="ud-go">🚪 LEAVE</button>
   </div>
 </div>`;
 	    document.body.appendChild(overlay);
 	    const goBtn = overlay.querySelector('#ud-leave-go');
 	    const cancelBtn = overlay.querySelector('#ud-leave-cancel');
-	    const typeInput = overlay.querySelector('#ud-leave-input');
 	    const prevFocus = document.activeElement;
 
 	    const finish = (val) => {
@@ -8003,19 +8050,16 @@ async function startAction() {
 	    };
 	    const onKey = (e) => {
 	      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); return; }
-	      if (e.key === 'Enter' && document.activeElement === typeInput) {
-	        e.preventDefault(); e.stopPropagation();
-	        if (!goBtn.disabled) finish(true);
-	        return;
-	      }
+	      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); finish(true); return; }
 	      e.stopPropagation();
 	    };
 	    document.addEventListener('keydown', onKey, true);
-	    typeInput.addEventListener('input', () => { goBtn.disabled = typeInput.value.trim().toUpperCase() !== 'LEAVE'; });
 	    goBtn.onclick = () => finish(true);
 	    cancelBtn.onclick = () => finish(false);
 	    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) finish(false); });
-	    setTimeout(() => typeInput.focus(), 30);
+	    // Safe default focus: never auto-focus the destructive button's hover state, but
+	    // Enter = go, same as the delete confirm dialog.
+	    setTimeout(() => goBtn.focus(), 30);
 	  });
 	}
 
@@ -8054,11 +8098,27 @@ async function startAction() {
 	    if (i < servers.length - 1 && !stopped) await sleep(1500); // gentle pace - same spirit as the purge engine's own delays
 	  }
 	  const skipped = servers.length - okCount - failCount;
-	  overlay.querySelector('.ud-actions').innerHTML = `<button id="ud-leaverun-close" class="ud-go">Done</button>`;
-	  overlay.querySelector('#ud-leaverun-close').onclick = () => overlay.remove();
-	  subEl.textContent = stopped
-	    ? `Stopped. Left ${okCount}, failed ${failCount}, skipped ${skipped}.`
-	    : `Done. Left ${okCount}, failed ${failCount}.`;
+	  subEl.textContent = '';
+	  const allGood = !stopped && failCount === 0 && okCount > 0;
+	  const finishIcon = allGood ? '✅' : (failCount ? '⚠️' : '🛑');
+	  const finishHeadline = stopped
+	    ? `Stopped early`
+	    : (allGood ? `All done` : `Finished with some hiccups`);
+	  const finishDetail = stopped
+	    ? `Left ${okCount}, failed ${failCount}, skipped ${skipped}.`
+	    : `Left ${okCount} of ${servers.length} server${servers.length === 1 ? '' : 's'}${failCount ? `, ${failCount} failed` : ''}.`;
+	  overlay.querySelector('#ud-modal').classList.add('ud-leave-done');
+	  overlay.querySelector('.ud-actions').insertAdjacentHTML('beforebegin', `
+<div class="ud-finish${allGood ? ' ok' : (failCount ? ' warn' : '')}">
+  <div class="ud-finish-icon">${finishIcon}</div>
+  <b>${escapeHTML(finishHeadline)}</b>
+  <span>${escapeHTML(finishDetail)}</span>
+</div>`);
+	  overlay.querySelector('.ud-actions').innerHTML = `<button id="ud-leaverun-close" class="ud-go">Close</button>`;
+	  const closeBtn = overlay.querySelector('#ud-leaverun-close');
+	  closeBtn.onclick = () => overlay.remove();
+	  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
+	  setTimeout(() => closeBtn.focus(), 30);
 	  udToast(
 	    stopped ? `Stopped: left ${okCount} of ${servers.length}.` : `Left ${okCount} of ${servers.length} server${servers.length === 1 ? '' : 's'}.`,
 	    { ms: 5000, type: failCount ? 'warn' : 'info' }
