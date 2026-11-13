@@ -7,6 +7,8 @@
 // @match           https://*.discord.com/channels/*
 // @match           https://*.discord.com/login
 // @license         MIT
+// @homepageURL     https://github.com/nullreaper-dev/reaper-discord-purger
+// @supportURL      https://github.com/nullreaper-dev/reaper-discord-purger/issues
 // @namespace       reaper-discord-purger
 // @icon            data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'><rect width='7' height='7' fill='%23120306'/><g fill='%23ff2a44'><rect x='1' y='0' width='5' height='1'/><rect x='0' y='1' width='7' height='1'/><rect x='0' y='2' width='1' height='2'/><rect x='3' y='2' width='1' height='2'/><rect x='6' y='2' width='1' height='2'/><rect x='0' y='4' width='7' height='1'/><rect x='1' y='5' width='2' height='1'/><rect x='4' y='5' width='2' height='1'/><rect x='1' y='6' width='1' height='1'/><rect x='3' y='6' width='1' height='1'/><rect x='5' y='6' width='1' height='1'/></g></svg>
 // @compatible      firefox
@@ -17,6 +19,10 @@
 // @downloadURL https://update.greasyfork.org/scripts/604030/Reaper%20-%20Discord%20Message%20Purger.user.js
 // @updateURL https://update.greasyfork.org/scripts/604030/Reaper%20-%20Discord%20Message%20Purger.meta.js
 // ==/UserScript==
+/* OFFICIAL SOURCES - Reaper (Discord Message Purger) is only published by nullreaper at:
+ *    https://greasyfork.org/en/scripts/604030
+  *    https://github.com/nullreaper-dev/reaper-discord-purger
+   * A copy from anywhere else may have been modified. */
 /*
  * Reaper - Discord Message Purger
  * A fork of Undiscord. Reaper adds a new UI, theme packs, animations, sounds,
